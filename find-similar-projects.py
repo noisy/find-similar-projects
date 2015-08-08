@@ -1,9 +1,28 @@
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
+"""
+find-similar-projects.py is simple script, which grep all pip requirements
+files in all Github repositories. Thanks to this, script you can easily
+find out whether someone else use similar configuration of python packages,
+how popular this configuration is.
+
+This could help you found hundreds of similar projects, which could be used
+by you as example :)
+
+Example of use:
+
+./find-similar-projects.py django==1.8 django-allauth django-rest-auth
+"""
+
 from __future__ import unicode_literals
 
+import argparse
+import os
+import re
 import urllib
 import urllib2
-import re
+import signal
+import sys
 
 from copy import deepcopy
 from lxml import etree
@@ -12,8 +31,23 @@ from termcolor import colored
 
 FILENAME_URL_XPATH = '//*[@id="code_search_results"]/div[1]/div/p/a[2]/@href'
 
+# Regex which parse:
+#     pysolr
+#     django-haystack
+#     Django>=1.7
+#     isbn>1.7
+#     djangorestframework==3.0.5
+#     djangorestframework-jwt==1.2.0
+#     django-haystack<2.0
+#     pkg3>=1.0,<=2.0
+#     broomstick
+#     isbn>1.7
+#     djangorestframework==3.0.5
+#     djangorestframework-jwt==1.2.0
 regex = r'^([\w-]*)(?:(>=|>|==|<=|<)([\d\.]*)(?:,(>=|>|==|<=|<)([\d\.]*))?)?'
 pattern = re.compile(regex, re.M)
+
+signal.signal(signal.SIGINT, lambda signal, frame: sys.exit(0))
 
 
 def parse_requirements(requirements):
@@ -70,7 +104,21 @@ def is_similar(requirements_parsed, repo_entries_parsed):
     return True
 
 
-def main(requirements_parsed):
+def main():
+
+    script = os.path.basename(__file__)
+
+    parser = argparse.ArgumentParser(
+        usage="{} python_package[==version] [python_package[==version] ...]".format(script),
+        epilog=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+
+    parser.add_argument('python_package', nargs='+')
+    args = parser.parse_args()
+
+    requirements = args.python_package
+    requirements_parsed = parse_requirements('\n'.join(requirements))
 
     page = 1
     params = {
@@ -152,13 +200,4 @@ def main(requirements_parsed):
         page += 1
 
 if __name__ == "__main__":
-
-    requirements = [
-        "django==1.8",
-        "djangorestframework==3.1.1",
-        "django-haystack"
-    ]
-
-    requirements_parsed = parse_requirements('\n'.join(requirements))
-
-    main(requirements_parsed)
+    main()
