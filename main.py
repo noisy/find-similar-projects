@@ -1,142 +1,164 @@
 # -*- coding: utf-8 -*-
 from __future__ import unicode_literals
+
 import urllib
 import urllib2
+import re
+
+from copy import deepcopy
 from lxml import etree
 from time import sleep
-from github import Github
 from termcolor import colored
 
+FILENAME_URL_XPATH = '//*[@id="code_search_results"]/div[1]/div/p/a[2]/@href'
 
-github = Github()
+regex = r'^([\w-]*)(?:(>=|>|==|<=|<)([\d\.]*)(?:,(>=|>|==|<=|<)([\d\.]*))?)?'
+pattern = re.compile(regex, re.M)
 
-def query_builder(requirenments=None, repos=None):
+
+def parse_requirements(requirements):
+    entries = pattern.findall(requirements.lower())
+    return [
+        {'status': None, 'entry': entry}
+        for entry in entries
+        if entry != ('', '', '', '', '')
+    ]
+
+
+def query_builder(requirements=None, repos=None):
     q = 'filename:requirements.txt'
-    for entry in requirenments or []:
-        package, version = entry.split('==')
-        q += ' "{}"'.format(package)
+
+    for entry in parse_requirements("\n".join(requirements)):
+        q += ' "{}"'.format(entry['entry'][0])
 
     for repo in repos or []:
         q += ' repo:{}'.format(repo)
 
     return q
 
-requirenments = [
-    "django==1.8",
-    "djangorestframework==3.1.1",
-]
 
-query = query_builder(requirenments)
-
-page = 1
-params = {
-    'type': 'Code',
-    # 'utf8': '✓',
-    'ref': 'searchresults',
-    'q': query,
-}
-
-xpath_selector1 = '//*[@id="code_search_results"]/div[1]/div/p/a[1]'
-# filename_xpath = '//*[@id="code_search_results"]/div[1]/div/p/a[2]/em'
-filename_url_xpath = '//*[@id="code_search_results"]/div[1]/div/p/a[2]/@href'
+def get_repo_from_blob(filename_blob_url):
+    return 'http://github.com/' + '/'.join(filename_blob_url.split('/')[1:3])
 
 
-repositories = []
+def get_raw_file_url_from_blob(filename_blob_url):
+    return 'https://raw.githubusercontent.com' + \
+           filename_blob_url.replace('/blob/', '/')
 
-while True:
-    params['p'] = str(page)
-    url = 'https://github.com/search?' + urllib.urlencode(params)
 
-    opener = urllib2.build_opener()
-    opener.addheaders = [('User-agent', 'Mozilla/5.0')]
+def is_similar(requirements_parsed, repo_entries_parsed):
+    for entry in requirements_parsed:
 
-    # print ">>  PAGE: %d <<" % page
-    try:
-        response = opener.open(url)
-    except Exception as e:
-        print str(e)
-        sleep(70)
-        response = opener.open(url)
+        repo_entries_to_check = [
+            e for e in repo_entries_parsed if not e['status']
+        ]
 
-    tree = etree.parse(response, etree.HTMLParser())
+        for repo_entry in repo_entries_to_check:
 
-    elements = tree.xpath(xpath_selector1)
-    if not elements:
-        break
+            if entry['entry'] == repo_entry['entry']:
+                entry['status'] = repo_entry['status'] = 'OK'
 
-    filename_blob_urls = tree.xpath(filename_url_xpath)
+                break
 
-    for filename_blob_url in filename_blob_urls:
-        filename_path = '/'.join(filename_blob_url.split('/')[5:])
+            if entry['entry'][0] == repo_entry['entry'][0]:
+                entry['status'] = repo_entry['status'] = 'ALMOST'
+                break
 
-        if 'requirements' in filename_path:
-            requirements_raw_file = 'https://raw.githubusercontent.com' + filename_blob_url.replace('/blob/', '/')
-            response = opener.open(requirements_raw_file)
-            try:
-                file_content = response.read() + u'\n'
-            except:
-                print "problem" + response.read()
+        if not entry['status']:
+            return False
 
-            status = "OK"
-            for entry in requirenments:
-                package, version = entry.split('==')
+    return True
 
-                if entry in file_content:
-                    continue
-                else:
-                    status = "ALMOST"
-                    if package + u'\n' in file_content:
-                        continue
+
+def main(requirements_parsed):
+
+    page = 1
+    params = {
+        'type': 'Code',
+        # 'utf8': '✓',requirements_raw_file
+        'ref': 'searchresults',
+        'q': query_builder(requirements),
+    }
+
+    while True:
+        params['p'] = str(page)
+        url = 'https://github.com/search?' + urllib.urlencode(params)
+        # print url
+
+        opener = urllib2.build_opener()
+        opener.addheaders = [('User-agent', 'Mozilla/5.0')]
+
+        # print ">>  PAGE: %d <<" % page
+        try:
+            response = opener.open(url)
+        except Exception as e:
+            # print str(e)
+            print "Github has to rest for a minute, please be patient ;)"
+            sleep(70)
+            response = opener.open(url)
+
+        tree = etree.parse(response, etree.HTMLParser())
+
+        filename_blob_urls = tree.xpath(FILENAME_URL_XPATH)
+
+        if not filename_blob_urls:
+            break
+
+        for filename_blob_url in filename_blob_urls:
+            # print "Repo" + '/'.join(filename_blob_url.split('/')[1:3])
+            filename_path = '/'.join(filename_blob_url.split('/')[5:])
+
+            if 'requirements' in filename_path:
+                raw_file_url = get_raw_file_url_from_blob(filename_blob_url)
+                response = opener.open(raw_file_url)
+                try:
+                    file_content = response.read()
+                except:
+                    print "there was some problem..."
+
+                requirements_parsed_cpy = deepcopy(requirements_parsed)
+                repo_entries_parsed = deepcopy(parse_requirements(file_content))
+
+                result = is_similar(requirements_parsed_cpy, repo_entries_parsed)
+
+                if result:
+                    print "Repository: " + get_repo_from_blob(filename_blob_url)
+
+                    repo_status = [
+                        entry['status'] == 'OK'
+                        for entry in requirements_parsed_cpy
+                    ]
+
+                    if all(repo_status):
+                        print "Status:" + colored("Perfect match", 'green')
                     else:
-                        status = "NO"
-                        break
+                        print "Status:" + colored("Similar project", 'yellow')
 
-            if status != "NO":
-                print "Repository: " + 'http://github.com/' + '/'.join(filename_blob_url.split('/')[1:3])
-                print "Status: " + colored(status, 'green' if status == 'OK' else 'yellow')
-                print "File: " + filename_path
+                    print "File: " + filename_path
 
-                for line in file_content.split('\n'):
-                    if line:
-                        print colored('\t' + line, 'cyan')
+                    for entry in repo_entries_parsed:
+                        print "   ",
+                        if entry['status'] == 'OK':
+                            print colored("".join(entry['entry']), 'green')
+                        elif entry['status'] == 'ALMOST':
+                            print colored(
+                                entry['entry'][0], 'cyan'
+                            ) + "".join(entry['entry'][1:])
+                        else:
+                            print "".join(entry['entry'])
 
-                print ""
+                    print ""
 
+        page += 1
 
+if __name__ == "__main__":
 
-    # repos = [elem.text for elem in elements]
-    #
-    # repositories += repos
-    #
-    # api_query = query_builder(requirenments, repos)
-    # results = github.search_code(api_query)
-    # for result in results:
-    #     requirenments_path = result.html_url
-    #     raw_requirenments = requirenments_path.replace('https://github.com/', 'https://raw.githubusercontent.com/').replace('/blob/', '/')
-    #
-    #     print raw_requirenments
-    #     response = opener.open(raw_requirenments)
-    #     print response.read()
+    requirements = [
+        "django==1.8",
+        "djangorestframework==3.1.1",
+        "django-haystack"
+    ]
 
+    requirements_parsed = parse_requirements('\n'.join(requirements))
 
-    page += 1
-
-
-# from lxml.etree import tostring
-#
-# # url = "https://github.com/search?p=2&q=filename%3Arequirements.txt+%22Django%22+%22django-rest-framework%22&ref=searchresults&type=Code&utf8=%E2%9C%93"
-# url = "https://github.com/search?p=2&utf8=%E2%9C%93&q=filename%3Arequirements.txt+%22Django%22+%22django-rest-framework%22+%22django-haystack%22+%22pysolr%22&type=Code&ref=searchresults"
-#
-#
-#
-# results =
-# print str(results)
-#
-#
-# for result in results:
-#     requirenments_path = result.html_url
-#     raw_requirenments = requirenments_path.replace('https://github.com/', 'https://raw.githubusercontent.com/').replace('/blob/', '/')
-#
-#     print raw_requirenments
-#
-# print "by"
+    main(requirements_parsed)
