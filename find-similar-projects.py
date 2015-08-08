@@ -12,6 +12,10 @@ by you as example :)
 Example of use:
 
 ./find-similar-projects.py django==1.8 django-allauth django-rest-auth
+
+
+Report bugs to <https://github.com/noisy/find-similar-projects/issues>
+
 """
 
 from __future__ import unicode_literals
