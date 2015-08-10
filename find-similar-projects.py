@@ -108,6 +108,20 @@ def is_similar(requirements_parsed, repo_entries_parsed):
     return True
 
 
+stats = {}
+
+
+def stats_builder(requirements_parsed):
+
+    for entry in requirements_parsed:
+        package_name = entry['entry'][0]
+
+        if package_name not in stats:
+            stats[package_name] = 1
+        else:
+            stats[package_name] += 1
+
+
 def main():
 
     script = os.path.basename(__file__)
@@ -201,7 +215,12 @@ def main():
 
                     print ""
 
+                    stats_builder(repo_entries_parsed)
+
         page += 1
+
+        for package in sorted(stats, key=stats.get, reverse=True):
+            print "{} - {}".format(package, stats[package])
 
 if __name__ == "__main__":
     main()
