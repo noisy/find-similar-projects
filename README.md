@@ -1,3 +1,5 @@
+[![PyPI version](https://badge.fury.io/py/find-similar-projects.svg)](http://badge.fury.io/py/find-similar-projects)
+
 # find-similar-projects
 
 `find-similar-projects.py` is simple script, which grep all pip requirements files in all Github repositories. Thanks to this, script you can easily find out whether someone else use similar configuration of python packages,
